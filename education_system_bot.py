@@ -11,14 +11,6 @@ conn = sqlite3.connect("school.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS admins (
-    id INTEGER PRIMARY KEY,
-    name TEXT,
-    pin TEXT
-)
-""")
-
-cursor.execute("""
 CREATE TABLE IF NOT EXISTS teachers (
     id INTEGER PRIMARY KEY,
     name TEXT,
@@ -46,21 +38,17 @@ CREATE TABLE IF NOT EXISTS grades (
 """)
 conn.commit()
 
-# ================= SEED =================
-cursor.execute("SELECT COUNT(*) FROM admins")
-if cursor.fetchone()[0] == 0:
-    cursor.execute("INSERT INTO admins VALUES (1, 'Администратор', '9999')")
+# ---------- преподаватели ----------
+teachers = [
+    (1, "Иванов И.И.", "Математика", "1111"),
+    (2, "Петров П.П.", "Информатика", "2222"),
+    (3, "Сидоров С.С.", "Физика", "3333")
+]
 
 cursor.execute("SELECT COUNT(*) FROM teachers")
 if cursor.fetchone()[0] == 0:
-    cursor.executemany(
-        "INSERT INTO teachers VALUES (?, ?, ?, ?)",
-        [
-            (1, "Иванов И.И.", "Математика", "1111"),
-            (2, "Петров П.П.", "Информатика", "2222"),
-        ]
-    )
-conn.commit()
+    cursor.executemany("INSERT INTO teachers VALUES (?, ?, ?, ?)", teachers)
+    conn.commit()
 
 states = {}
 
@@ -77,13 +65,7 @@ def final_mark(p):
 # ================= МЕНЮ =================
 def role_menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🛠 Администратор", "👨‍🏫 Преподаватель", "👨‍🎓 Ученик")
-    return kb
-
-def admin_menu():
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("➕ Добавить преподавателя", "📋 Список преподавателей")
-    kb.add("❌ Удалить преподавателя", "🚪 Выйти")
+    kb.add("👨‍🏫 Преподаватель", "👨‍🎓 Ученик")
     return kb
 
 def teacher_menu():
@@ -107,61 +89,6 @@ def start(m):
 def logout(m):
     start(m)
 
-# ================= АДМИНИСТРАТОР =================
-@bot.message_handler(func=lambda m: m.text == "🛠 Администратор")
-def admin_login(m):
-    states[m.chat.id] = {"step": "admin_pin"}
-    bot.send_message(m.chat.id, "Введите PIN администратора:")
-
-@bot.message_handler(func=lambda m: states.get(m.chat.id, {}).get("step") == "admin_pin")
-def admin_auth(m):
-    cursor.execute("SELECT name FROM admins WHERE pin=?", (m.text,))
-    admin = cursor.fetchone()
-    if not admin:
-        bot.send_message(m.chat.id, "❌ Неверный PIN")
-        return
-
-    states[m.chat.id] = {"role": "admin"}
-    bot.send_message(m.chat.id, "Меню администратора", reply_markup=admin_menu())
-
-@bot.message_handler(func=lambda m: m.text == "➕ Добавить преподавателя")
-def add_teacher(m):
-    states[m.chat.id]["step"] = "add_teacher"
-    bot.send_message(m.chat.id, "Введите: ФИО, Предмет (через запятую)")
-
-@bot.message_handler(func=lambda m: states.get(m.chat.id, {}).get("step") == "add_teacher")
-def save_teacher(m):
-    name, subject = map(str.strip, m.text.split(","))
-    pin = str(random.randint(1000, 9999))
-    cursor.execute(
-        "INSERT INTO teachers VALUES (?, ?, ?, ?)",
-        (random.randint(100,999), name, subject, pin)
-    )
-    conn.commit()
-    states[m.chat.id].pop("step")
-    bot.send_message(m.chat.id, f"✅ Преподаватель добавлен\nPIN: {pin}", reply_markup=admin_menu())
-
-@bot.message_handler(func=lambda m: m.text == "📋 Список преподавателей")
-def list_teachers(m):
-    cursor.execute("SELECT name, subject, pin FROM teachers")
-    rows = cursor.fetchall()
-    text = "📋 Преподаватели:\n\n"
-    for n,s,p in rows:
-        text += f"{n} — {s} — PIN: {p}\n"
-    bot.send_message(m.chat.id, text, reply_markup=admin_menu())
-
-@bot.message_handler(func=lambda m: m.text == "❌ Удалить преподавателя")
-def del_teacher_start(m):
-    states[m.chat.id]["step"] = "del_teacher"
-    bot.send_message(m.chat.id, "Введите PIN преподавателя:")
-
-@bot.message_handler(func=lambda m: states.get(m.chat.id, {}).get("step") == "del_teacher")
-def del_teacher(m):
-    cursor.execute("DELETE FROM teachers WHERE pin=?", (m.text,))
-    conn.commit()
-    states[m.chat.id].pop("step")
-    bot.send_message(m.chat.id, "✅ Преподаватель удалён", reply_markup=admin_menu())
-
 # ================= ПРЕПОДАВАТЕЛЬ =================
 @bot.message_handler(func=lambda m: m.text == "👨‍🏫 Преподаватель")
 def teacher_login(m):
@@ -176,8 +103,93 @@ def teacher_auth(m):
         bot.send_message(m.chat.id, "❌ Неверный PIN")
         return
 
-    states[m.chat.id] = {"role":"teacher","name":t[0],"subject":t[1]}
+    states[m.chat.id] = {
+        "role": "teacher",
+        "name": t[0],
+        "subject": t[1]
+    }
     bot.send_message(m.chat.id, f"Предмет: {t[1]}", reply_markup=teacher_menu())
+
+# ================= ДОБАВИТЬ УЧЕНИКА =================
+@bot.message_handler(func=lambda m: m.text == "👤 Добавить ученика")
+def add_student(m):
+    states[m.chat.id]["step"] = "add_student"
+    bot.send_message(m.chat.id, "Введите ФИО ученика:")
+
+@bot.message_handler(func=lambda m: states.get(m.chat.id, {}).get("step") == "add_student")
+def save_student(m):
+    pin = str(random.randint(1000, 9999))
+    cursor.execute(
+        "INSERT INTO students VALUES (?, ?, ?)",
+        (random.randint(100000, 999999), m.text, pin)
+    )
+    conn.commit()
+    states[m.chat.id].pop("step")
+    bot.send_message(m.chat.id, f"✅ Ученик добавлен\nPIN: {pin}", reply_markup=teacher_menu())
+
+# ================= СПИСОК УЧЕНИКОВ =================
+@bot.message_handler(func=lambda m: m.text == "📋 Список учеников")
+def list_students(m):
+    cursor.execute("SELECT name, pin FROM students")
+    rows = cursor.fetchall()
+    if not rows:
+        bot.send_message(m.chat.id, "Учеников нет")
+        return
+
+    text = "📋 Ученики:\n\n"
+    for n, p in rows:
+        text += f"{n} — PIN: {p}\n"
+
+    bot.send_message(m.chat.id, text, reply_markup=teacher_menu())
+
+# ================= ОЦЕНКИ =================
+@bot.message_handler(func=lambda m: m.text == "📝 Ввести оценки")
+def choose_student(m):
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    cursor.execute("SELECT name FROM students")
+    for s in cursor.fetchall():
+        kb.add(s[0])
+    kb.add("🚪 Выйти")
+    states[m.chat.id]["step"] = "choose_student"
+    bot.send_message(m.chat.id, "Выберите ученика:", reply_markup=kb)
+
+@bot.message_handler(func=lambda m: states.get(m.chat.id, {}).get("step") == "choose_student")
+def choose_semester(m):
+    cursor.execute("SELECT id FROM students WHERE name=?", (m.text,))
+    st = cursor.fetchone()
+    if not st:
+        return
+    states[m.chat.id]["student_id"] = st[0]
+    states[m.chat.id]["step"] = "semester"
+    bot.send_message(m.chat.id, "Введите семестр (1 или 2):")
+
+@bot.message_handler(func=lambda m: states.get(m.chat.id, {}).get("step") == "semester")
+def input_grades(m):
+    states[m.chat.id]["semester"] = int(m.text)
+    states[m.chat.id]["step"] = "grades"
+    bot.send_message(m.chat.id, "Введите оценки через запятую:")
+
+@bot.message_handler(func=lambda m: states.get(m.chat.id, {}).get("step") == "grades")
+def input_comment(m):
+    states[m.chat.id]["grades"] = m.text.replace(" ", "")
+    states[m.chat.id]["step"] = "comment"
+    bot.send_message(m.chat.id, "Комментарий:")
+
+@bot.message_handler(func=lambda m: states.get(m.chat.id, {}).get("step") == "comment")
+def save_grades(m):
+    cursor.execute(
+        "INSERT INTO grades VALUES (?, ?, ?, ?, ?)",
+        (
+            states[m.chat.id]["student_id"],
+            states[m.chat.id]["subject"],
+            states[m.chat.id]["semester"],
+            states[m.chat.id]["grades"],
+            m.text
+        )
+    )
+    conn.commit()
+    states[m.chat.id].pop("step")
+    bot.send_message(m.chat.id, "✅ Оценки сохранены", reply_markup=teacher_menu())
 
 # ================= УЧЕНИК =================
 @bot.message_handler(func=lambda m: m.text == "👨‍🎓 Ученик")
@@ -204,6 +216,9 @@ def progress(m):
         (states[m.chat.id]["student_id"],)
     )
     rows = cursor.fetchall()
+    if not rows:
+        bot.send_message(m.chat.id, "Оценок пока нет")
+        return
 
     data = {}
     comments = {}
@@ -227,4 +242,3 @@ def progress(m):
     bot.send_message(m.chat.id, text)
 
 bot.polling()
-
