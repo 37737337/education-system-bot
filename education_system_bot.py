@@ -3,7 +3,7 @@ import sqlite3
 import random
 from telebot import types
 
-TOKEN = "8430402915:AAFWZbU8F0R5uOKRItmYJDxrxJDXak-h-6A"
+TOKEN = "BOT_TOKEN"
 bot = telebot.TeleBot(TOKEN)
 
 # ================= БАЗА ДАННЫХ =================
@@ -227,3 +227,4 @@ def progress(m):
     bot.send_message(m.chat.id, text)
 
 bot.polling()
+
