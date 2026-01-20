@@ -27,6 +27,7 @@ BTN_LIST_STUDENTS = "📋 Список учеников"
 BTN_ADD_TEACHER = "➕ Добавить преподавателя"
 BTN_LIST_TEACHERS = "📋 Список преподавателей"
 BTN_DELETE_PROFILE = "🗑 Удалить профиль"
+BTN_BROADCAST = "📨 Рассылка"  # Новая кнопка
 
 BTN_PROGRESS = "📊 Моя успеваемость"
 BTN_CHANGE_PASSWORD = "🔐 Сменить пароль"
@@ -72,6 +73,12 @@ CREATE TABLE IF NOT EXISTS grades(
     grades TEXT,
     comment TEXT,
     FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users(
+    chat_id INTEGER PRIMARY KEY
 )
 """)
 conn.commit()
@@ -124,6 +131,7 @@ def role_menu():
 def admin_menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(BTN_ADD_TEACHER, BTN_LIST_TEACHERS)
+    kb.add(BTN_BROADCAST)  # ← НОВАЯ КНОПКА
     kb.add(BTN_DELETE_PROFILE)
     kb.add(BTN_EXIT)
     return kb
@@ -156,6 +164,10 @@ def confirm_delete_button():
 # ================== START & EXIT ==================
 @bot.message_handler(commands=["start"])
 def start(m):
+    # Сохраняем chat_id пользователя
+    cursor.execute("INSERT OR IGNORE INTO users (chat_id) VALUES (?)", (m.chat.id,))
+    conn.commit()
+
     s = state(m.chat.id)
     s["role"] = None
     s["step"] = None
@@ -212,7 +224,7 @@ def add_teacher(m):
     if s["role"] != "admin":
         bot.send_message(m.chat.id, "❌ Эта функция доступна только администратору.", reply_markup=role_menu())
         return
-    reset_step(m.chat.id)  # ← КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
+    reset_step(m.chat.id)
     s["step"] = "teacher_name"
     bot.send_message(m.chat.id, "👤 Введите ФИО преподавателя (должно быть уникальным):", reply_markup=cancel_button())
 
@@ -262,7 +274,7 @@ def list_teachers(m):
     if s["role"] != "admin":
         bot.send_message(m.chat.id, "❌ Эта функция доступна только администратору.", reply_markup=role_menu())
         return
-    reset_step(m.chat.id)  # ← КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
+    reset_step(m.chat.id)
     cursor.execute("SELECT login, subject FROM teachers")
     teachers = cursor.fetchall()
     if not teachers:
@@ -272,6 +284,48 @@ def list_teachers(m):
     for name, subject in teachers:
         text += f"• <b>{name}</b> — {subject}\n"
     bot.send_message(m.chat.id, text, parse_mode="HTML", reply_markup=admin_menu())
+
+# ================== BROADCAST (ADMIN) ==================
+@bot.message_handler(func=lambda m: m.text == BTN_BROADCAST)
+def broadcast_start(m):
+    s = state(m.chat.id)
+    if s["role"] != "admin":
+        bot.send_message(m.chat.id, "❌ Только админ может делать рассылку.", reply_markup=role_menu())
+        return
+    reset_step(m.chat.id)
+    s["step"] = "broadcast_text"
+    bot.send_message(m.chat.id, "📬 Введите текст рассылки (можно с HTML):", reply_markup=cancel_button())
+
+@bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "broadcast_text")
+def broadcast_send(m):
+    s = state(m.chat.id)
+    message_text = m.text.strip()
+    if not message_text:
+        bot.send_message(m.chat.id, "❌ Текст не может быть пустым.", reply_markup=cancel_button())
+        return
+
+    cursor.execute("SELECT chat_id FROM users")
+    all_chats = cursor.fetchall()
+
+    success = 0
+    failed = 0
+
+    for (chat_id,) in all_chats:
+        try:
+            bot.send_message(chat_id, message_text, parse_mode="HTML")
+            success += 1
+        except Exception as e:
+            print(f"Не удалось отправить {chat_id}: {e}")
+            failed += 1
+
+    reset_step(m.chat.id)
+    bot.send_message(
+        m.chat.id,
+        f"✅ Рассылка завершена!\n"
+        f"Успешно: {success}\n"
+        f"Ошибок: {failed}",
+        reply_markup=admin_menu()
+    )
 
 # ================== DELETE PROFILE (ADMIN) ==================
 @bot.message_handler(func=lambda m: m.text == BTN_DELETE_PROFILE)
@@ -382,6 +436,24 @@ def save_student(m):
         parse_mode="HTML",
         reply_markup=teacher_menu()
     )
+
+# ================== LIST STUDENTS (TEACHER) ==================
+@bot.message_handler(func=lambda m: m.text == BTN_LIST_STUDENTS)
+def list_students(m):
+    s = state(m.chat.id)
+    if s["role"] != "teacher":
+        bot.send_message(m.chat.id, "❌ Эта функция доступна только преподавателю.", reply_markup=role_menu())
+        return
+    reset_step(m.chat.id)
+    cursor.execute("SELECT login FROM students")
+    students = cursor.fetchall()
+    if not students:
+        bot.send_message(m.chat.id, "📭 Нет учеников в системе.", reply_markup=teacher_menu())
+        return
+    text = "📋 <b>Список учеников:</b>\n\n"
+    for (name,) in students:
+        text += f"• {name}\n"
+    bot.send_message(m.chat.id, text, parse_mode="HTML", reply_markup=teacher_menu())
 
 # ================== ENTER GRADES (TEACHER) ==================
 @bot.message_handler(func=lambda m: m.text == BTN_ENTER_GRADES)
