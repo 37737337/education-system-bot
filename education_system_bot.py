@@ -23,11 +23,12 @@ BTN_STUDENT = "👨‍🎓 Ученик"
 BTN_ADD_STUDENT = "👤 Добавить ученика"
 BTN_ENTER_GRADES = "✏️ Ввести оценки"
 BTN_LIST_STUDENTS = "📋 Список учеников"
+BTN_VIEW_STUDENT_GRADES = "🔍 Посмотреть оценки ученика"
 
 BTN_ADD_TEACHER = "➕ Добавить преподавателя"
 BTN_LIST_TEACHERS = "📋 Список преподавателей"
 BTN_DELETE_PROFILE = "🗑 Удалить профиль"
-BTN_BROADCAST = "📨 Рассылка"  # Новая кнопка
+BTN_BROADCAST = "📨 Рассылка"
 
 BTN_PROGRESS = "📊 Моя успеваемость"
 BTN_CHANGE_PASSWORD = "🔐 Сменить пароль"
@@ -131,7 +132,7 @@ def role_menu():
 def admin_menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(BTN_ADD_TEACHER, BTN_LIST_TEACHERS)
-    kb.add(BTN_BROADCAST)  # ← НОВАЯ КНОПКА
+    kb.add(BTN_BROADCAST)
     kb.add(BTN_DELETE_PROFILE)
     kb.add(BTN_EXIT)
     return kb
@@ -139,7 +140,7 @@ def admin_menu():
 def teacher_menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(BTN_ADD_STUDENT)
-    kb.add(BTN_ENTER_GRADES)
+    kb.add(BTN_ENTER_GRADES, BTN_VIEW_STUDENT_GRADES)
     kb.add(BTN_LIST_STUDENTS)
     kb.add(BTN_EXIT)
     return kb
@@ -164,25 +165,274 @@ def confirm_delete_button():
 # ================== START & EXIT ==================
 @bot.message_handler(commands=["start"])
 def start(m):
-    # Сохраняем chat_id пользователя
     cursor.execute("INSERT OR IGNORE INTO users (chat_id) VALUES (?)", (m.chat.id,))
     conn.commit()
 
     s = state(m.chat.id)
     s["role"] = None
     s["step"] = None
-    bot.send_message(m.chat.id, "👋 Добро пожаловать!\nВыберите роль:", reply_markup=role_menu())
+
+    bot.send_message(
+        m.chat.id,
+        "🎓 <b>Добро пожаловать в SchoolBot!</b>\n\n"
+        "Выберите свою роль, чтобы войти в систему:\n"
+        "👨‍🎓 <b>Ученик</b> — просмотр оценок\n"
+        "👨‍🏫 <b>Преподаватель</b> — ввод и управление\n"
+        "🛠 <b>Администратор</b> — настройка системы",
+        parse_mode="HTML",
+        reply_markup=role_menu()
+    )
+
+@bot.message_handler(commands=["cancel"])
+def cmd_cancel(m):
+    cancel(m)
 
 @bot.message_handler(func=lambda m: m.text == BTN_CANCEL)
 def cancel(m):
     reset_step(m.chat.id)
     s = state(m.chat.id)
     if s["role"] == "admin":
-        bot.send_message(m.chat.id, "↩️ Отменено.", reply_markup=admin_menu())
+        bot.send_message(m.chat.id, "↩️ Отменено. Вы в панели администратора.", reply_markup=admin_menu())
     elif s["role"] == "teacher":
-        bot.send_message(m.chat.id, "↩️ Отменено.", reply_markup=teacher_menu())
+        bot.send_message(m.chat.id, "↩️ Отменено. Вы в меню преподавателя.", reply_markup=teacher_menu())
     elif s["role"] == "student":
-        bot.send_message(m.chat.id, "↩️ Отменено.", reply_markup=student_menu())
+        bot.send_message(m.chat.id, "↩️ Отменено. Вы в личном кабинете.", reply_markup=student_menu())
+    else:
+        start(m)
+
+@bot.message_handler(func=lambda m: m.text == BTN_EXIT)
+def exit_menu(m):
+    start(m)
+
+# ================== ADMIN AUTH ==================
+@bot.message_handler(func=lambda m: m.text == BTN_ADMIN)
+def admin_login(m):
+    s = state(m.chat.id)
+    s["role"] = None
+    s["step"] = "admin_login"
+    bot.send_message(m.chat.id, "🔐 Введите логин администратора:", reply_markup=cancel_button())
+
+@bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "admin_login")
+def admin_password(m):
+    s = state(m.chat.id)
+    s["login"] = m.text
+    s["step"] = "admin_password"
+    bot.send_message(m.chat.id, "🔑 Введите пароль:", reply_markup=cancel_button())
+
+@bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "admin_password")
+def admin_auth(m):
+    s = state(m.chat.id)
+    cursor.execute("SELECT id FROM admins WHERE login=? AND password=?", (s["Отлично! Вот **полный обновлённый файл** с:
+
+✅ Красивым и удобным интерфейсом  
+✅ Полезными функциями (просмотр оценок ученика, предпросмотр рассылки)  
+✅ Чёткой навигацией, эмодзи, подсказками и защитой от ошибок  
+✅ Поддержкой команды `/cancel`  
+
+---
+
+📁 **Файл: `school_bot.py`**
+
+```python
+import os
+import sqlite3
+import random
+import string
+import time
+import telebot
+from telebot import types
+from dotenv import load_dotenv
+
+# ================== CONFIG ==================
+load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("❌ BOT_TOKEN не найден в .env файле")
+
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# ================== BUTTONS ==================
+BTN_ADMIN = "🛠 Администратор"
+BTN_TEACHER = "👨‍🏫 Преподаватель"
+BTN_STUDENT = "👨‍🎓 Ученик"
+
+BTN_ADD_STUDENT = "👤 Добавить ученика"
+BTN_ENTER_GRADES = "✏️ Ввести оценки"
+BTN_LIST_STUDENTS = "📋 Список учеников"
+BTN_VIEW_STUDENT_GRADES = "🔍 Посмотреть оценки ученика"
+
+BTN_ADD_TEACHER = "➕ Добавить преподавателя"
+BTN_LIST_TEACHERS = "📋 Список преподавателей"
+BTN_DELETE_PROFILE = "🗑 Удалить профиль"
+BTN_BROADCAST = "📨 Рассылка"
+
+BTN_PROGRESS = "📊 Моя успеваемость"
+BTN_CHANGE_PASSWORD = "🔐 Сменить пароль"
+BTN_EXIT = "🚪 Выйти"
+BTN_CANCEL = "❌ Отмена"
+BTN_CONFIRM_DELETE = "✅ Подтвердить удаление"
+
+# ================== DATABASE ==================
+conn = sqlite3.connect("school.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS admins(
+    id INTEGER PRIMARY KEY,
+    login TEXT UNIQUE,
+    password TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS teachers(
+    id INTEGER PRIMARY KEY,
+    login TEXT UNIQUE,
+    subject TEXT,
+    password TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS students(
+    id INTEGER PRIMARY KEY,
+    login TEXT UNIQUE,
+    password TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS grades(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER,
+    subject TEXT,
+    semester INTEGER,
+    grades TEXT,
+    comment TEXT,
+    FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users(
+    chat_id INTEGER PRIMARY KEY
+)
+""")
+conn.commit()
+
+# ================== SEED DEFAULT ADMIN ==================
+cursor.execute("SELECT COUNT(*) FROM admins")
+if cursor.fetchone()[0] == 0:
+    cursor.execute("INSERT INTO admins (login, password) VALUES ('admin', 'admin123')")
+    conn.commit()
+
+# ================== STATE MANAGEMENT ==================
+states = {}
+
+def state(chat_id):
+    return states.setdefault(chat_id, {"role": None, "step": None})
+
+def reset_step(chat_id):
+    states[chat_id]["step"] = None
+
+# ================== UTILS ==================
+def gen_password():
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+
+def percent(grades):
+    if not grades:
+        return 0.0
+    return round(sum(grades) / len(grades) / 5 * 100, 1)
+
+def final_mark(p):
+    if p <= 54: return 2
+    if p <= 69: return 3
+    if p <= 84: return 4
+    return 5
+
+def validate_grades(text):
+    try:
+        grades = list(map(int, text.split(",")))
+        if all(2 <= g <= 5 for g in grades):
+            return grades
+    except:
+        pass
+    return None
+
+# ================== KEYBOARDS ==================
+def role_menu():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(BTN_ADMIN, BTN_TEACHER, BTN_STUDENT)
+    return kb
+
+def admin_menu():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(BTN_ADD_TEACHER, BTN_LIST_TEACHERS)
+    kb.add(BTN_BROADCAST)
+    kb.add(BTN_DELETE_PROFILE)
+    kb.add(BTN_EXIT)
+    return kb
+
+def teacher_menu():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(BTN_ADD_STUDENT)
+    kb.add(BTN_ENTER_GRADES, BTN_VIEW_STUDENT_GRADES)
+    kb.add(BTN_LIST_STUDENTS)
+    kb.add(BTN_EXIT)
+    return kb
+
+def student_menu():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(BTN_PROGRESS)
+    kb.add(BTN_CHANGE_PASSWORD)
+    kb.add(BTN_EXIT)
+    return kb
+
+def cancel_button():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(BTN_CANCEL)
+    return kb
+
+def confirm_delete_button():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(BTN_CONFIRM_DELETE, BTN_CANCEL)
+    return kb
+
+# ================== START & EXIT ==================
+@bot.message_handler(commands=["start"])
+def start(m):
+    cursor.execute("INSERT OR IGNORE INTO users (chat_id) VALUES (?)", (m.chat.id,))
+    conn.commit()
+
+    s = state(m.chat.id)
+    s["role"] = None
+    s["step"] = None
+
+    bot.send_message(
+        m.chat.id,
+        "🎓 <b>Добро пожаловать в SchoolBot!</b>\n\n"
+        "Выберите свою роль, чтобы войти в систему:\n"
+        "👨‍🎓 <b>Ученик</b> — просмотр оценок\n"
+        "👨‍🏫 <b>Преподаватель</b> — ввод и управление\n"
+        "🛠 <b>Администратор</b> — настройка системы",
+        parse_mode="HTML",
+        reply_markup=role_menu()
+    )
+
+@bot.message_handler(commands=["cancel"])
+def cmd_cancel(m):
+    cancel(m)
+
+@bot.message_handler(func=lambda m: m.text == BTN_CANCEL)
+def cancel(m):
+    reset_step(m.chat.id)
+    s = state(m.chat.id)
+    if s["role"] == "admin":
+        bot.send_message(m.chat.id, "↩️ Отменено. Вы в панели администратора.", reply_markup=admin_menu())
+    elif s["role"] == "teacher":
+        bot.send_message(m.chat.id, "↩️ Отменено. Вы в меню преподавателя.", reply_markup=teacher_menu())
+    elif s["role"] == "student":
+        bot.send_message(m.chat.id, "↩️ Отменено. Вы в личном кабинете.", reply_markup=student_menu())
     else:
         start(m)
 
@@ -210,12 +460,17 @@ def admin_auth(m):
     s = state(m.chat.id)
     cursor.execute("SELECT id FROM admins WHERE login=? AND password=?", (s["login"], m.text))
     if not cursor.fetchone():
-        bot.send_message(m.chat.id, "❌ Неверные данные", reply_markup=role_menu())
+        bot.send_message(m.chat.id, "❌ Неверные данные. Попробуйте снова.", reply_markup=role_menu())
         reset_step(m.chat.id)
         return
     s["role"] = "admin"
     reset_step(m.chat.id)
-    bot.send_message(m.chat.id, "✅ Вы вошли как администратор", reply_markup=admin_menu())
+    bot.send_message(
+        m.chat.id,
+        "✅ <b>Вы вошли как администратор!</b>\n\nВыберите действие:",
+        parse_mode="HTML",
+        reply_markup=admin_menu()
+    )
 
 # ================== ADD TEACHER (ADMIN) ==================
 @bot.message_handler(func=lambda m: m.text == BTN_ADD_TEACHER)
@@ -258,11 +513,11 @@ def save_teacher(m):
     reset_step(m.chat.id)
     bot.send_message(
         m.chat.id,
-        f"✅ Преподаватель успешно добавлен!\n\n"
-        f"ФИО: <b>{name}</b>\n"
-        f"Предмет: <b>{subject}</b>\n"
-        f"Пароль: <code>{password}</code>\n\n"
-        f"⚠️ Перешлите пароль преподавателю!",
+        f"✅ <b>Преподаватель успешно добавлен!</b>\n\n"
+        f"👤 ФИО: <b>{name}</b>\n"
+        f"📚 Предмет: <b>{subject}</b>\n"
+        f"🔑 Пароль: <code>{password}</code>\n\n"
+        f"❗ <i>Перешлите пароль преподавателю — он не сохраняется в системе!</i>",
         parse_mode="HTML",
         reply_markup=admin_menu()
     )
@@ -272,7 +527,7 @@ def save_teacher(m):
 def list_teachers(m):
     s = state(m.chat.id)
     if s["role"] != "admin":
-        bot.send_message(m.chat.id, "❌ Эта функция доступна только администратору.", reply_markup=role_menu())
+        bot.send_message(m.chat.id, "❌ Только для администраторов.", reply_markup=role_menu())
         return
     reset_step(m.chat.id)
     cursor.execute("SELECT login, subject FROM teachers")
@@ -294,45 +549,71 @@ def broadcast_start(m):
         return
     reset_step(m.chat.id)
     s["step"] = "broadcast_text"
-    bot.send_message(m.chat.id, "📬 Введите текст рассылки (можно с HTML):", reply_markup=cancel_button())
+    bot.send_message(m.chat.id, "📬 Введите текст рассылки (можно использовать HTML):", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "broadcast_text")
-def broadcast_send(m):
+def broadcast_preview(m):
     s = state(m.chat.id)
     message_text = m.text.strip()
     if not message_text:
         bot.send_message(m.chat.id, "❌ Текст не может быть пустым.", reply_markup=cancel_button())
         return
 
+    # Сохраняем текст
+    s["broadcast_content"] = message_text
+
+    # Предпросмотр
+    bot.send_message(m.chat.id, "📤 <b>Предпросмотр рассылки:</b>", parse_mode="HTML")
+    try:
+        bot.send_message(m.chat.id, message_text, parse_mode="HTML")
+    except Exception as e:
+        bot.send_message(m.chat.id, "⚠️ Ошибка в HTML-разметке. Отправка без форматирования.")
+        bot.send_message(m.chat.id, message_text)
+
+    # Подтверждение
+    s["step"] = "confirm_broadcast"
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("✅ Отправить всем", "❌ Отменить")
+    bot.send_message(m.chat.id, "❓ Отправить это сообщение всем пользователям?", reply_markup=kb)
+
+@bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "confirm_broadcast" and m.text == "✅ Отправить всем")
+def broadcast_confirmed(m):
+    s = state(m.chat.id)
+    message_text = s["broadcast_content"]
     cursor.execute("SELECT chat_id FROM users")
     all_chats = cursor.fetchall()
 
     success = 0
     failed = 0
-
     for (chat_id,) in all_chats:
         try:
             bot.send_message(chat_id, message_text, parse_mode="HTML")
             success += 1
-        except Exception as e:
-            print(f"Не удалось отправить {chat_id}: {e}")
+        except:
             failed += 1
 
     reset_step(m.chat.id)
     bot.send_message(
         m.chat.id,
-        f"✅ Рассылка завершена!\n"
-        f"Успешно: {success}\n"
-        f"Ошибок: {failed}",
+        f"✅ <b>Рассылка отправлена!</b>\n"
+        f"👥 Получателей: {len(all_chats)}\n"
+        f"✅ Успешно: {success}\n"
+        f"❌ Ошибок: {failed}",
+        parse_mode="HTML",
         reply_markup=admin_menu()
     )
+
+@bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "confirm_broadcast" and m.text == "❌ Отменить")
+def broadcast_cancelled(m):
+    reset_step(m.chat.id)
+    bot.send_message(m.chat.id, "📨 Рассылка отменена.", reply_markup=admin_menu())
 
 # ================== DELETE PROFILE (ADMIN) ==================
 @bot.message_handler(func=lambda m: m.text == BTN_DELETE_PROFILE)
 def admin_delete(m):
     s = state(m.chat.id)
     if s["role"] != "admin":
-        bot.send_message(m.chat.id, "❌ Эта функция доступна только администратору.", reply_markup=role_menu())
+        bot.send_message(m.chat.id, "❌ Только для администраторов.", reply_markup=role_menu())
         return
     reset_step(m.chat.id)
     s["step"] = "delete_login"
@@ -362,7 +643,7 @@ def admin_delete_confirm(m):
     bot.send_message(
         m.chat.id,
         f"❓ Вы уверены, что хотите удалить <b>{login}</b>?\n"
-        f"Все данные будут удалены безвозвратно!",
+        f"❗ Все данные будут удалены безвозвратно!",
         parse_mode="HTML",
         reply_markup=confirm_delete_button()
     )
@@ -398,18 +679,25 @@ def teacher_auth(m):
     cursor.execute("SELECT id, subject FROM teachers WHERE login=? AND password=?", (s["login"], m.text))
     row = cursor.fetchone()
     if not row:
-        bot.send_message(m.chat.id, "❌ Неверные данные", reply_markup=role_menu())
+        bot.send_message(m.chat.id, "❌ Неверные данные. Попробуйте снова.", reply_markup=role_menu())
         reset_step(m.chat.id)
         return
     s.update({"role": "teacher", "subject": row[1], "step": None})
-    bot.send_message(m.chat.id, f"✅ Добро пожаловать!\nПредмет: <b>{row[1]}</b>", parse_mode="HTML", reply_markup=teacher_menu())
+    bot.send_message(
+        m.chat.id,
+        f"✅ <b>Добро пожаловать, {s['login']}!</b>\n"
+        f"📚 Ваш предмет: <b>{row[1]}</b>\n\n"
+        f"Выберите действие:",
+        parse_mode="HTML",
+        reply_markup=teacher_menu()
+    )
 
 # ================== ADD STUDENT (TEACHER) ==================
 @bot.message_handler(func=lambda m: m.text == BTN_ADD_STUDENT)
 def add_student(m):
     s = state(m.chat.id)
     if s["role"] != "teacher":
-        bot.send_message(m.chat.id, "❌ Эта функция доступна только преподавателю.", reply_markup=role_menu())
+        bot.send_message(m.chat.id, "❌ Только для преподавателей.", reply_markup=role_menu())
         return
     reset_step(m.chat.id)
     s["step"] = "student_name"
@@ -432,7 +720,10 @@ def save_student(m):
     reset_step(m.chat.id)
     bot.send_message(
         m.chat.id,
-        f"✅ Ученик добавлен!\n\nЛогин: <b>{name}</b>\nПароль: <code>{password}</code>",
+        f"✅ <b>Ученик добавлен!</b>\n\n"
+        f"👤 ФИО: <b>{name}</b>\n"
+        f"🔑 Пароль: <code>{password}</code>\n\n"
+        f"❗ <i>Сообщите пароль ученику — он не сохраняется!</i>",
         parse_mode="HTML",
         reply_markup=teacher_menu()
     )
@@ -442,7 +733,7 @@ def save_student(m):
 def list_students(m):
     s = state(m.chat.id)
     if s["role"] != "teacher":
-        bot.send_message(m.chat.id, "❌ Эта функция доступна только преподавателю.", reply_markup=role_menu())
+        bot.send_message(m.chat.id, "❌ Только для преподавателей.", reply_markup=role_menu())
         return
     reset_step(m.chat.id)
     cursor.execute("SELECT login FROM students")
@@ -453,14 +744,67 @@ def list_students(m):
     text = "📋 <b>Список учеников:</b>\n\n"
     for (name,) in students:
         text += f"• {name}\n"
+    text += "\n💡 <i>Нажмите «✏️ Ввести оценки» или «🔍 Посмотреть оценки», чтобы работать с успеваемостью.</i>"
     bot.send_message(m.chat.id, text, parse_mode="HTML", reply_markup=teacher_menu())
+
+# ================== VIEW STUDENT GRADES (TEACHER) ==================
+@bot.message_handler(func=lambda m: m.text == BTN_VIEW_STUDENT_GRADES)
+def view_student_grades_start(m):
+    s = state(m.chat.id)
+    if s["role"] != "teacher":
+        bot.send_message(m.chat.id, "❌ Только для преподавателей.", reply_markup=role_menu())
+        return
+    reset_step(m.chat.id)
+    cursor.execute("SELECT login FROM students")
+    students = cursor.fetchall()
+    if not students:
+        bot.send_message(m.chat.id, "📭 Нет учеников.", reply_markup=teacher_menu())
+        return
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for (name,) in students:
+        kb.add(name)
+    kb.add(BTN_CANCEL)
+    s["step"] = "view_choose_student"
+    bot.send_message(m.chat.id, "🔍 Выберите ученика для просмотра оценок по вашему предмету:", reply_markup=kb)
+
+@bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "view_choose_student")
+def show_student_grades(m):
+    student_name = m.text.strip()
+    cursor.execute("SELECT id FROM students WHERE login=?", (student_name,))
+    row = cursor.fetchone()
+    if not row:
+        bot.send_message(m.chat.id, "❌ Ученик не найден.", reply_markup=cancel_button())
+        return
+
+    student_id = row[0]
+    cursor.execute("SELECT subject, semester, grades, comment FROM grades WHERE student_id=? AND subject=?", (student_id, state(m.chat.id)["subject"]))
+    rows = cursor.fetchall()
+
+    if not rows:
+        bot.send_message(m.chat.id, f"📭 У ученика <b>{student_name}</b> пока нет оценок по предмету «{state(m.chat.id)['subject']}».", parse_mode="HTML", reply_markup=teacher_menu())
+        reset_step(m.chat.id)
+        return
+
+    text = f"📊 <b>Оценки ученика: {student_name}</b>\n\n"
+    for subj, sem, g_str, comm in rows:
+        grades = list(map(int, g_str.split(",")))
+        p = percent(grades)
+        text += (
+            f"• <b>{subj}</b> — {sem} семестр\n"
+            f"  Оценки: <code>{g_str}</code>\n"
+            f"  Комментарий: {comm}\n"
+            f"  Средний %: {p}% → Итог: <b>{final_mark(p)}</b>\n\n"
+        )
+
+    bot.send_message(m.chat.id, text, parse_mode="HTML", reply_markup=teacher_menu())
+    reset_step(m.chat.id)
 
 # ================== ENTER GRADES (TEACHER) ==================
 @bot.message_handler(func=lambda m: m.text == BTN_ENTER_GRADES)
 def start_grades(m):
     s = state(m.chat.id)
     if s["role"] != "teacher":
-        bot.send_message(m.chat.id, "❌ Эта функция доступна только преподавателю.", reply_markup=role_menu())
+        bot.send_message(m.chat.id, "❌ Только для преподавателей.", reply_markup=role_menu())
         return
     reset_step(m.chat.id)
     cursor.execute("SELECT login FROM students")
@@ -473,7 +817,7 @@ def start_grades(m):
         kb.add(name)
     kb.add(BTN_CANCEL)
     s["step"] = "choose_student"
-    bot.send_message(m.chat.id, "Выберите ученика:", reply_markup=kb)
+    bot.send_message(m.chat.id, "✏️ Выберите ученика для ввода оценок:", reply_markup=kb)
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "choose_student")
 def choose_student(m):
@@ -485,28 +829,28 @@ def choose_student(m):
     s = state(m.chat.id)
     s["student_id"] = row[0]
     s["step"] = "semester"
-    bot.send_message(m.chat.id, "Введите семестр (1 или 2):", reply_markup=cancel_button())
+    bot.send_message(m.chat.id, "🔢 Введите номер семестра (1 или 2):", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "semester")
 def enter_semester(m):
     if m.text not in ("1", "2"):
-        bot.send_message(m.chat.id, "🔢 Введите 1 или 2", reply_markup=cancel_button())
+        bot.send_message(m.chat.id, "🔢 Пожалуйста, введите 1 или 2.", reply_markup=cancel_button())
         return
     s = state(m.chat.id)
     s["semester"] = int(m.text)
     s["step"] = "grades"
-    bot.send_message(m.chat.id, "Введите оценки (2–5) через запятую:", reply_markup=cancel_button())
+    bot.send_message(m.chat.id, "🎯 Введите оценки (от 2 до 5) через запятую:\nПример: <code>5,4,5,3</code>", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "grades")
 def enter_grades(m):
     grades = validate_grades(m.text)
     if not grades:
-        bot.send_message(m.chat.id, "❌ Оценки должны быть от 2 до 5, через запятую.", reply_markup=cancel_button())
+        bot.send_message(m.chat.id, "❌ Оценки должны быть от 2 до 5, через запятую.\nПример: <code>4,5,3,4</code>", reply_markup=cancel_button())
         return
     s = state(m.chat.id)
     s["grades"] = ",".join(map(str, grades))
     s["step"] = "comment"
-    bot.send_message(m.chat.id, "Комментарий (можно оставить пустым):", reply_markup=cancel_button())
+    bot.send_message(m.chat.id, "💬 Добавьте комментарий (можно оставить пустым):", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "comment")
 def save_grades(m):
@@ -518,7 +862,7 @@ def save_grades(m):
     )
     conn.commit()
     reset_step(m.chat.id)
-    bot.send_message(m.chat.id, "✅ Оценки сохранены!", reply_markup=teacher_menu())
+    bot.send_message(m.chat.id, "✅ Оценки успешно сохранены!", reply_markup=teacher_menu())
 
 # ================== STUDENT AUTH ==================
 @bot.message_handler(func=lambda m: m.text == BTN_STUDENT)
@@ -541,17 +885,23 @@ def student_auth(m):
     cursor.execute("SELECT id FROM students WHERE login=? AND password=?", (s["login"], m.text))
     row = cursor.fetchone()
     if not row:
-        bot.send_message(m.chat.id, "❌ Неверные данные", reply_markup=role_menu())
+        bot.send_message(m.chat.id, "❌ Неверные данные. Попробуйте снова.", reply_markup=role_menu())
         reset_step(m.chat.id)
         return
     s.update({"role": "student", "student_id": row[0], "step": None})
-    bot.send_message(m.chat.id, "✅ Добро пожаловать в личный кабинет!", reply_markup=student_menu())
+    bot.send_message(
+        m.chat.id,
+        f"✅ <b>Добро пожаловать, {s['login']}!</b>\n\n"
+        f"Ваш личный кабинет готов.",
+        parse_mode="HTML",
+        reply_markup=student_menu()
+    )
 
 @bot.message_handler(func=lambda m: m.text == BTN_CHANGE_PASSWORD)
 def change_password(m):
     s = state(m.chat.id)
     if s["role"] != "student":
-        bot.send_message(m.chat.id, "❌ Эта функция доступна только ученику.", reply_markup=role_menu())
+        bot.send_message(m.chat.id, "❌ Только для учеников.", reply_markup=role_menu())
         return
     reset_step(m.chat.id)
     s["step"] = "new_password"
@@ -567,7 +917,7 @@ def save_new_password(m):
     cursor.execute("UPDATE students SET password=? WHERE id=?", (new_pass, s["student_id"]))
     conn.commit()
     reset_step(m.chat.id)
-    bot.send_message(m.chat.id, "✅ Пароль изменён!", reply_markup=student_menu())
+    bot.send_message(m.chat.id, "✅ Пароль успешно изменён!", reply_markup=student_menu())
 
 @bot.message_handler(func=lambda m: m.text == BTN_PROGRESS)
 def progress(m):
@@ -578,7 +928,7 @@ def progress(m):
     cursor.execute("SELECT subject, semester, grades, comment FROM grades WHERE student_id=?", (s["student_id"],))
     rows = cursor.fetchall()
     if not rows:
-        bot.send_message(m.chat.id, "📭 У вас пока нет оценок.")
+        bot.send_message(m.chat.id, "📭 У вас пока нет оценок. Обратитесь к преподавателю.", reply_markup=student_menu())
         return
     data = {}
     comments = {}
@@ -592,15 +942,16 @@ def progress(m):
         comment_text = "; ".join(filter(lambda x: x != "—", comments[(subj, sem)])) or "—"
         text += (
             f"<b>{subj}</b> — {sem} семестр\n"
-            f"Оценки: {','.join(map(str, grades))}\n"
+            f"Оценки: <code>{','.join(map(str, grades))}</code>\n"
             f"Комментарий: {comment_text}\n"
-            f"Процент: {p}% → Итог: <b>{final_mark(p)}</b>\n\n"
+            f"Средний %: {p}% → Итог: <b>{final_mark(p)}</b>\n\n"
         )
-    bot.send_message(m.chat.id, text, parse_mode="HTML")
+    text += "🔽 <i>Скопируйте этот текст, чтобы показать родителям или учителю.</i>"
+    bot.send_message(m.chat.id, text, parse_mode="HTML", reply_markup=student_menu())
 
 # ================== RUN ==================
 if __name__ == "__main__":
-    print("🚀 Бот запущен...")
+    print("🚀 SchoolBot запущен!")
     while True:
         try:
             bot.polling(none_stop=True, timeout=60, long_polling_timeout=60)
