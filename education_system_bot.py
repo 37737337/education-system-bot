@@ -30,15 +30,17 @@ BTN_DELETE_PROFILE = "🗑 Удалить профиль"
 BTN_PROGRESS = "📊 Моя успеваемость"
 BTN_CHANGE_PASSWORD = "🔐 Сменить пароль"
 BTN_EXIT = "🚪 Выйти"
+BTN_CANCEL = "❌ Отмена"
 
 # ================== DATABASE ==================
 conn = sqlite3.connect("school.db", check_same_thread=False)
 cursor = conn.cursor()
 
+# Изменено: id автоинкрементный, убран ручной ввод
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS admins(
     id INTEGER PRIMARY KEY,
-    login TEXT,
+    login TEXT UNIQUE,
     password TEXT
 )
 """)
@@ -46,7 +48,7 @@ CREATE TABLE IF NOT EXISTS admins(
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS teachers(
     id INTEGER PRIMARY KEY,
-    login TEXT,
+    login TEXT UNIQUE,
     subject TEXT,
     password TEXT
 )
@@ -55,18 +57,20 @@ CREATE TABLE IF NOT EXISTS teachers(
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS students(
     id INTEGER PRIMARY KEY,
-    login TEXT,
+    login TEXT UNIQUE,
     password TEXT
 )
 """)
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS grades(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     student_id INTEGER,
     subject TEXT,
     semester INTEGER,
     grades TEXT,
-    comment TEXT
+    comment TEXT,
+    FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
 )
 """)
 conn.commit()
@@ -74,9 +78,8 @@ conn.commit()
 # ================== SEED ==================
 cursor.execute("SELECT COUNT(*) FROM admins")
 if cursor.fetchone()[0] == 0:
-    cursor.execute("INSERT INTO admins VALUES (1,'admin','admin123')")
-
-conn.commit()
+    cursor.execute("INSERT INTO admins (login, password) VALUES ('admin','admin123')")
+    conn.commit()
 
 # ================== STATE ==================
 states = {}
@@ -92,6 +95,8 @@ def gen_password():
     return ''.join(random.choices(string.ascii_letters + string.digits, k=6))
 
 def percent(grades):
+    if not grades:
+        return 0.0
     return round(sum(grades) / len(grades) / 5 * 100, 1)
 
 def final_mark(p):
@@ -137,13 +142,32 @@ def student_menu():
     kb.add(BTN_EXIT)
     return kb
 
-# ================== START ==================
+def cancel_button():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(BTN_CANCEL)
+    return kb
+
+# ================== START & CANCEL ==================
 @bot.message_handler(commands=["start"])
 def start(m):
     s = state(m.chat.id)
     s["role"] = None
     s["step"] = None
     bot.send_message(m.chat.id, "Выберите роль:", reply_markup=role_menu())
+
+@bot.message_handler(commands=["cancel"])
+@bot.message_handler(func=lambda m: m.text == BTN_CANCEL)
+def cancel(m):
+    reset_step(m.chat.id)
+    s = state(m.chat.id)
+    if s["role"] == "admin":
+        bot.send_message(m.chat.id, "Отменено.", reply_markup=admin_menu())
+    elif s["role"] == "teacher":
+        bot.send_message(m.chat.id, "Отменено.", reply_markup=teacher_menu())
+    elif s["role"] == "student":
+        bot.send_message(m.chat.id, "Отменено.", reply_markup=student_menu())
+    else:
+        start(m)
 
 @bot.message_handler(func=lambda m: m.text == BTN_EXIT)
 def exit_menu(m):
@@ -154,24 +178,22 @@ def exit_menu(m):
 def admin_login(m):
     s = state(m.chat.id)
     s["step"] = "admin_login"
-    bot.send_message(m.chat.id, "Введите логин администратора:")
+    bot.send_message(m.chat.id, "Введите логин администратора:", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "admin_login")
 def admin_password(m):
     s = state(m.chat.id)
     s["login"] = m.text
     s["step"] = "admin_password"
-    bot.send_message(m.chat.id, "Введите пароль:")
+    bot.send_message(m.chat.id, "Введите пароль:", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "admin_password")
 def admin_auth(m):
     s = state(m.chat.id)
-    cursor.execute(
-        "SELECT id FROM admins WHERE login=? AND password=?",
-        (s["login"], m.text)
-    )
+    cursor.execute("SELECT id FROM admins WHERE login=? AND password=?", (s["login"], m.text))
     if not cursor.fetchone():
-        bot.send_message(m.chat.id, "❌ Неверные данные")
+        bot.send_message(m.chat.id, "❌ Неверные данные", reply_markup=role_menu())
+        reset_step(m.chat.id)
         return
     s["role"] = "admin"
     reset_step(m.chat.id)
@@ -184,40 +206,45 @@ def admin_delete(m):
     if s["role"] != "admin":
         return
     s["step"] = "delete_login"
-    bot.send_message(m.chat.id, "Введите логин (ФИО) для удаления:")
+    bot.send_message(m.chat.id, "Введите логин (ФИО) для удаления:", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "delete_login")
 def admin_delete_confirm(m):
-    cursor.execute("DELETE FROM students WHERE login=?", (m.text,))
-    cursor.execute("DELETE FROM teachers WHERE login=?", (m.text,))
+    login = m.text.strip()
+    # Удаляем ученика и связанные оценки (CASCADE не всегда работает, явно удалим)
+    cursor.execute("DELETE FROM grades WHERE student_id IN (SELECT id FROM students WHERE login=?)", (login,))
+    cursor.execute("DELETE FROM students WHERE login=?", (login,))
+    cursor.execute("DELETE FROM teachers WHERE login=?", (login,))
     conn.commit()
+    affected = cursor.rowcount
     reset_step(m.chat.id)
-    bot.send_message(m.chat.id, "✅ Профиль удалён", reply_markup=admin_menu())
+    if affected > 0:
+        bot.send_message(m.chat.id, "✅ Профиль удалён", reply_markup=admin_menu())
+    else:
+        bot.send_message(m.chat.id, "⚠️ Профиль не найден", reply_markup=admin_menu())
 
 # ================== TEACHER ==================
 @bot.message_handler(func=lambda m: m.text == BTN_TEACHER)
 def teacher_login(m):
     s = state(m.chat.id)
     s["step"] = "teacher_login"
-    bot.send_message(m.chat.id, "Введите логин (ФИО):")
+    bot.send_message(m.chat.id, "Введите логин (ФИО):", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "teacher_login")
 def teacher_password(m):
     s = state(m.chat.id)
     s["login"] = m.text
     s["step"] = "teacher_password"
-    bot.send_message(m.chat.id, "Введите пароль:")
+    bot.send_message(m.chat.id, "Введите пароль:", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "teacher_password")
 def teacher_auth(m):
     s = state(m.chat.id)
-    cursor.execute(
-        "SELECT id, subject FROM teachers WHERE login=? AND password=?",
-        (s["login"], m.text)
-    )
+    cursor.execute("SELECT id, subject FROM teachers WHERE login=? AND password=?", (s["login"], m.text))
     row = cursor.fetchone()
     if not row:
-        bot.send_message(m.chat.id, "❌ Неверные данные")
+        bot.send_message(m.chat.id, "❌ Неверные данные", reply_markup=role_menu())
+        reset_step(m.chat.id)
         return
     s.update({"role":"teacher","subject":row[1],"step":None})
     bot.send_message(m.chat.id, f"Предмет: {row[1]}", reply_markup=teacher_menu())
@@ -229,20 +256,25 @@ def add_student(m):
     if s["role"] != "teacher":
         return
     s["step"] = "student_name"
-    bot.send_message(m.chat.id, "Введите ФИО ученика:")
+    bot.send_message(m.chat.id, "Введите ФИО ученика (уникальное):", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "student_name")
 def save_student(m):
+    name = m.text.strip()
+    # Проверка на уникальность
+    cursor.execute("SELECT id FROM students WHERE login=?", (name,))
+    if cursor.fetchone():
+        bot.send_message(m.chat.id, "❌ Ученик с таким ФИО уже существует!", reply_markup=teacher_menu())
+        reset_step(m.chat.id)
+        return
+
     password = gen_password()
-    cursor.execute(
-        "INSERT INTO students VALUES (?,?,?)",
-        (random.randint(100000,999999), m.text, password)
-    )
+    cursor.execute("INSERT INTO students (login, password) VALUES (?, ?)", (name, password))
     conn.commit()
     reset_step(m.chat.id)
     bot.send_message(
         m.chat.id,
-        f"✅ Ученик добавлен\nЛогин: {m.text}\nПароль: {password}",
+        f"✅ Ученик добавлен\nЛогин: {name}\nПароль: {password}",
         reply_markup=teacher_menu()
     )
 
@@ -254,51 +286,56 @@ def start_grades(m):
         return
     cursor.execute("SELECT login FROM students")
     students = cursor.fetchall()
+    if not students:
+        bot.send_message(m.chat.id, "⚠️ Нет учеников в системе.")
+        return
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     for (name,) in students:
         kb.add(name)
-    kb.add(BTN_EXIT)
+    kb.add(BTN_CANCEL)
     s["step"] = "choose_student"
     bot.send_message(m.chat.id, "Выберите ученика:", reply_markup=kb)
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "choose_student")
 def choose_student(m):
-    cursor.execute("SELECT id FROM students WHERE login=?", (m.text,))
+    cursor.execute("SELECT id FROM students WHERE login=?", (m.text.strip(),))
     row = cursor.fetchone()
     if not row:
+        bot.send_message(m.chat.id, "❌ Ученик не найден. Попробуйте снова:", reply_markup=cancel_button())
         return
     s = state(m.chat.id)
     s["student_id"] = row[0]
     s["step"] = "semester"
-    bot.send_message(m.chat.id, "Введите семестр (1 или 2):")
+    bot.send_message(m.chat.id, "Введите семестр (1 или 2):", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "semester")
 def enter_semester(m):
     if m.text not in ("1","2"):
-        bot.send_message(m.chat.id, "Введите 1 или 2")
+        bot.send_message(m.chat.id, "Введите 1 или 2", reply_markup=cancel_button())
         return
     s = state(m.chat.id)
     s["semester"] = int(m.text)
     s["step"] = "grades"
-    bot.send_message(m.chat.id, "Введите оценки (2–5) через запятую:")
+    bot.send_message(m.chat.id, "Введите оценки (2–5) через запятую:", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "grades")
 def enter_grades(m):
     grades = validate_grades(m.text)
     if not grades:
-        bot.send_message(m.chat.id, "❌ Оценки должны быть от 2 до 5")
+        bot.send_message(m.chat.id, "❌ Оценки должны быть от 2 до 5, через запятую (например: 5,4,5)", reply_markup=cancel_button())
         return
     s = state(m.chat.id)
     s["grades"] = ",".join(map(str, grades))
     s["step"] = "comment"
-    bot.send_message(m.chat.id, "Комментарий:")
+    bot.send_message(m.chat.id, "Комментарий (можно оставить пустым):", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "comment")
 def save_grades(m):
     s = state(m.chat.id)
+    comment = m.text.strip() if m.text.strip() else "—"
     cursor.execute(
-        "INSERT INTO grades VALUES (?,?,?,?,?)",
-        (s["student_id"], s["subject"], s["semester"], s["grades"], m.text)
+        "INSERT INTO grades (student_id, subject, semester, grades, comment) VALUES (?,?,?,?,?)",
+        (s["student_id"], s["subject"], s["semester"], s["grades"], comment)
     )
     conn.commit()
     reset_step(m.chat.id)
@@ -309,25 +346,23 @@ def save_grades(m):
 def student_login(m):
     s = state(m.chat.id)
     s["step"] = "student_login"
-    bot.send_message(m.chat.id, "Введите логин (ФИО):")
+    bot.send_message(m.chat.id, "Введите логин (ФИО):", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "student_login")
 def student_password(m):
     s = state(m.chat.id)
     s["login"] = m.text
     s["step"] = "student_password"
-    bot.send_message(m.chat.id, "Введите пароль:")
+    bot.send_message(m.chat.id, "Введите пароль:", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "student_password")
 def student_auth(m):
     s = state(m.chat.id)
-    cursor.execute(
-        "SELECT id FROM students WHERE login=? AND password=?",
-        (s["login"], m.text)
-    )
+    cursor.execute("SELECT id FROM students WHERE login=? AND password=?", (s["login"], m.text))
     row = cursor.fetchone()
     if not row:
-        bot.send_message(m.chat.id, "❌ Неверные данные")
+        bot.send_message(m.chat.id, "❌ Неверные данные", reply_markup=role_menu())
+        reset_step(m.chat.id)
         return
     s.update({"role":"student","student_id":row[0],"step":None})
     bot.send_message(m.chat.id, "Меню ученика", reply_markup=student_menu())
@@ -338,15 +373,12 @@ def change_password(m):
     if s["role"] != "student":
         return
     s["step"] = "new_password"
-    bot.send_message(m.chat.id, "Введите новый пароль:")
+    bot.send_message(m.chat.id, "Введите новый пароль:", reply_markup=cancel_button())
 
 @bot.message_handler(func=lambda m: state(m.chat.id)["step"] == "new_password")
 def save_new_password(m):
     s = state(m.chat.id)
-    cursor.execute(
-        "UPDATE students SET password=? WHERE id=?",
-        (m.text, s["student_id"])
-    )
+    cursor.execute("UPDATE students SET password=? WHERE id=?", (m.text, s["student_id"]))
     conn.commit()
     reset_step(m.chat.id)
     bot.send_message(m.chat.id, "✅ Пароль изменён", reply_markup=student_menu())
@@ -377,7 +409,7 @@ def progress(m):
         text += (
             f"{subj} — {sem} семестр\n"
             f"Оценки: {','.join(map(str, grades))}\n"
-            f"Комментарий: {'; '.join(comments[(subj, sem)])}\n"
+            f"Комментарий: {'; '.join(filter(None, comments[(subj, sem)]))}\n"
             f"Процент: {p}%\n"
             f"Итог: {final_mark(p)}\n\n"
         )
@@ -385,4 +417,6 @@ def progress(m):
     bot.send_message(m.chat.id, text)
 
 # ================== RUN ==================
-bot.polling()
+if __name__ == "__main__":
+    print("Бот запущен...")
+    bot.polling(none_stop=True)
